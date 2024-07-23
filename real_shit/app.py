@@ -136,7 +136,18 @@ def main():
             rephrased_question, top_paragraphs, extended_paragraphs = run_gpt(original_question, model_choice)
 
             # Format the response with context
-            context_str = "\n".join([f"§{p.payload['cislo']}, {p.payload['staleURL'].rsplit('/', 1)[0]}, {p.payload['law_name']}" for p in top_paragraphs])
+            context_str = "\n".join([f"""
+## zakon cislo {i}
+### paragraph
+§{p.payload['cislo']}
+### cislo zakona
+{p.payload['staleURL'].rsplit('/', 1)[0]}
+### jmeno zakona
+{p.payload['law_name']}
+### zneni zakona
+{p.payload['zneni']}
+---------------------------------
+""" for i, p in enumerate(top_paragraphs)])
 
             st.write(f"Přeformulovaný dotaz: {rephrased_question}")
 
@@ -149,7 +160,7 @@ def main():
                         """You are a highly qualified lawyer with many years of experience.
                         Your task is to answer the following question, to answer which you will be given
                         the context of the relevant sections to the question along with its number,
-                        its wording and the law it is from. For your answer, use primarily the attached
+                        its wording and the law it is from. For your answer, use exclusively the attached
                         context. Always properly cite the law and the paragraph number that you used to 
                         answer the question.
                         
