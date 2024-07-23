@@ -1,0 +1,12 @@
+/venv
+.DS_Store
+*.json*
+/data
+/db
+/open_data
+.env*
+.vscode
+*__pycache__*
+/logs
+data.zip
+*.log*
