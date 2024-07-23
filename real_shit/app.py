@@ -137,7 +137,7 @@ def main():
 
             # Format the response with context
             context_str = "\n".join([f"""
-## zakon cislo {i}
+                                     
 ### paragraph
 §{p.payload['cislo']}
 ### cislo zakona
