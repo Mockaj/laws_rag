@@ -75,7 +75,6 @@ def query_paragraph_range(client, staleURL, cislo, collection_name="legal_paragr
     return extended_paragraphs
 
 def query_and_rerank(query_text, collection_name="legal_paragraphs_updated", neighbours_paragraph=1, top_n=100, rerank_top_k=5):
-    
     client = QdrantClient(url=QDRANT_HOST, api_key=QDRANT_API_KEY)
     query_embedding = embed(query_text)
     search_result = client.search(
@@ -95,18 +94,18 @@ def query_and_rerank(query_text, collection_name="legal_paragraphs_updated", nei
     
     # Fetch the paragraphs around each found paragraph
     extended_paragraphs = []
-    for point in top_paragraphs:
-        cislo = int(point.payload["cislo"])
-        staleURL = point.payload["staleURL"]
-        extended_paragraphs.extend(query_paragraph_range(client, staleURL, cislo))
+    # for point in top_paragraphs:
+    #     cislo = int(point.payload["cislo"])
+    #     staleURL = point.payload["staleURL"]
+    #     extended_paragraphs.extend(query_paragraph_range(client, staleURL, cislo))
 
-    # Remove duplicates from extended paragraphs
-    extended_paragraphs = remove_duplicates(extended_paragraphs)
+    # # Remove duplicates from extended paragraphs
+    # extended_paragraphs = remove_duplicates(extended_paragraphs)
     return top_paragraphs, extended_paragraphs
 
 # Function to run GPT model
-def run_gpt(question: str):
-    llm = ChatOpenAI(model="gpt-4o-mini", temperature=0.7)
+def run_gpt(question: str, model_name: str):
+    llm = ChatOpenAI(model=model_name, temperature=0.7)
     messages_query = [
         ("system", """You will get a question from a lawyer in Czech language who needs an answer to his question.
          In order to be able to answer him, you first need to know the relevant paragraphs from
@@ -125,20 +124,24 @@ def run_gpt(question: str):
 def main():
     st.title("Legal Query Assistant")
     st.write("Enter your legal question in Czech:")
+    
+    # Model selection
+    model_choice = st.radio("Choose the model:", ("gpt-4o", "gpt-4o-mini"))
+    
     original_question = st.text_area("Question:")
 
     if st.button("Submit"):
         if original_question:
             # Rephrase the question and fetch relevant paragraphs
-            rephrased_question, top_paragraphs, extended_paragraphs = run_gpt(original_question)
+            rephrased_question, top_paragraphs, extended_paragraphs = run_gpt(original_question, model_choice)
 
             # Format the response with context
-            context_str = "\n".join([f"§{p.payload['cislo']}, {p.payload['staleURL'].rsplit('/', 1)[0]}, {p.payload['law_name']}" for p in extended_paragraphs])
+            context_str = "\n".join([f"§{p.payload['cislo']}, {p.payload['staleURL'].rsplit('/', 1)[0]}, {p.payload['law_name']}" for p in top_paragraphs])
 
             st.write(f"Přeformulovaný dotaz: {rephrased_question}")
 
             # Answer the question using the found paragraphs
-            model = ChatOpenAI(model="gpt-4o-mini", temperature=0.0)
+            model = ChatOpenAI(model=model_choice, temperature=0.0)
             prompt = ChatPromptTemplate.from_messages(
                 [
                     (
@@ -163,9 +166,6 @@ def main():
             for chunk in runnable.stream({"question": rephrased_question, "context": context_str}, config=RunnableConfig()):
                 llm_response += chunk
                 response_placeholder.write(llm_response)  # Overwrite with new content
-
-            st.write("Odpověď na otázku:")
-            st.write(llm_response)
 
             # Stream the relevant paragraphs found by vector search
             relevant_paragraphs = "\n\n\n".join([f"§{p.payload['cislo']}, {p.payload['staleURL'].rsplit('/', 1)[0]}, {p.payload['law_name']}" for p in top_paragraphs])
