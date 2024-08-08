@@ -137,7 +137,7 @@ async def main():
             st.write(f"Přeformulovaný dotaz: {rephrased_question}")
 
             # Answer the question using the found paragraphs
-            model = ChatOpenAI(model=model_choice, temperature=0.0)
+            model = ChatOpenAI(model=model_choice, temperature=0.6)
             prompt = ChatPromptTemplate.from_messages(
                 [
                     (
@@ -164,9 +164,14 @@ async def main():
                 response_placeholder.write(llm_response)  # Overwrite with new content
 
             # Stream the relevant paragraphs found by vector search
-            relevant_paragraphs = "\n\n\n".join([f"§{p.payload['cislo']}, {p.payload['staleURL'].rsplit('/', 1)[0]}, {p.payload['law_name']}" for p in top_paragraphs])
+            relevant_paragraphs = []
+            for p in top_paragraphs:
+                parts = p.payload['staleURL'].split("/")
+                numbering = "/".join(parts[-3:-1][::-1])
+                relevant_paragraphs.append(f"§ {p.payload['cislo']} zákona č. {numbering} Sb.")
             st.write("NALEZENÉ RELEVANTNÍ PARAGRAFY:")
-            st.write(relevant_paragraphs)
+            for p in relevant_paragraphs:
+                st.write(p+"\n")
 
 if __name__ == "__main__":
     asyncio.run(main())

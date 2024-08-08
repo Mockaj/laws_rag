@@ -1,5 +1,5 @@
 import os
-from voyageai import AsyncClient
+from voyageai import Client
 import voyageai.error as error
 from typing import List, Optional
 from dotenv import load_dotenv
@@ -10,7 +10,7 @@ load_dotenv()
 
 def serve_async_client():
     try:
-        client = AsyncClient(api_key=VOYAGE_API_KEY)
+        client = Client(api_key=VOYAGE_API_KEY)
         return client
     except:
         raise error.VoyageError("Error serving Voyage client")
@@ -18,12 +18,12 @@ def serve_async_client():
 
 async def embed(text: List[str], input_type: str = "query"):
     vo = serve_async_client()
-    result = await vo.embed(text, model="voyage-multilingual-2", input_type=input_type)
+    result = vo.embed(text, model="voyage-multilingual-2", input_type=input_type)
     return result.embeddings[0]
 
 async def rerank(query: str, documents: List[str], model: str, top_k: Optional[int] = None, truncation: bool = True):
     vo = serve_async_client()
-    reranking_object = await vo.rerank(
+    reranking_object =  vo.rerank(
         query=query,
         documents=documents,
         model=model,
