@@ -4,11 +4,8 @@ import streamlit as st
 from embeddings.utils import embed, rerank
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import ScoredPoint
 from qdrant_client.models import Filter, FieldCondition, MatchValue
-from typing import Any, List, Optional
 from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
 from langchain.prompts import ChatPromptTemplate
 from langchain.schema import StrOutputParser
 from langchain.schema.runnable import Runnable
@@ -22,8 +19,6 @@ LANGCHAIN_TRACING_V2 = os.getenv("LANGCHAIN_TRACING_V2")
 LANGCHAIN_ENDPOINT = os.getenv("LANGCHAIN_ENDPOINT")
 QDRANT_API_KEY = os.getenv("QDRANT_API_KEY", None)
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
-
-
 
 def remove_duplicates(paragraphs):
     seen = set()
@@ -89,89 +84,114 @@ async def query_and_rerank(query_text, collection_name="legal_paragraphs_updated
     return top_paragraphs, extended_paragraphs
 
 # Function to run GPT model
-async def run_gpt(question: str, model_name: str):
+async def run_gpt(question: str, model_name: str, messages: list):
     llm = ChatOpenAI(model=model_name, temperature=0.7)
-    messages_query = [
-        ("system", """You will get a question from a lawyer in Czech language who needs an answer to his question.
-         In order to be able to answer him, you first need to know the relevant paragraphs from
-         the relevant laws from Czech law. Your task is to rephrase the query into a question, using which to further
-         to find the relevant sections. Always answer a question with a rephrased question only, no additional text!
-         As a rule, answer in Czech language only."""),
-        ("human", f"QUESTION: {question}"),
+    # Rephrase the question
+    rephrase_prompt = [
+        {"role": "system", "content": """You will get a question from a lawyer in Czech language who needs an answer to his question.
+In order to be able to answer him, you first need to know the relevant paragraphs from
+the relevant laws from Czech law. Your task is to rephrase the query into a question, using which to further
+to find the relevant sections. Always answer a question with a rephrased question only, no additional text!
+As a rule, answer in Czech language only."""},
+        {"role": "user", "content": question}
     ]
-    updated_query = llm.invoke(messages_query).content
-    top_paragraphs, extended_paragraphs = await query_and_rerank(updated_query, top_n=50, rerank_top_k=7)
+    rephrased_question = llm.invoke(rephrase_prompt).content
+    
+    top_paragraphs, extended_paragraphs = await query_and_rerank(rephrased_question, top_n=50, rerank_top_k=3)
     # Remove duplicates
     top_paragraphs = remove_duplicates(top_paragraphs)
-    return updated_query, top_paragraphs, extended_paragraphs
+    return rephrased_question, top_paragraphs, extended_paragraphs
 
 # Streamlit app
 async def main():
     st.title("Legal Query Assistant")
+
+    # Move model selection to sidebar
+    with st.sidebar:
+        st.write("Model Selection")
+        model_choice = st.radio("Choose the model:", ("gpt-4o", "gpt-4o-mini"))
+
     st.write("Enter your legal question in Czech:")
-    
-    # Model selection
-    model_choice = st.radio("Choose the model:", ("gpt-4o", "gpt-4o-mini"))
-    
-    original_question = st.text_area("Question:")
 
-    if st.button("Submit"):
-        if original_question:
-            # Rephrase the question and fetch relevant paragraphs
-            rephrased_question, top_paragraphs, extended_paragraphs = await run_gpt(original_question, model_choice)
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
-            # Format the response with context
-            context_str = "\n".join([f"""
-                                     
-### paragraph
+    # Display chat history
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Accept user input
+    if prompt := st.chat_input("What is up?"):
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        # Rephrase the question and fetch relevant paragraphs
+        rephrased_question, top_paragraphs, extended_paragraphs = await run_gpt(prompt, model_choice, st.session_state.messages)
+
+        # Format the response with context
+        context_str = "\n".join([f"""
+paragraph
 §{p.payload['cislo']}
-### cislo zakona
+cislo zakona
 {p.payload['staleURL'].rsplit('/', 1)[0]}
-### jmeno zakona
+jmeno zakona
 {p.payload['law_name']}
-### zneni zakona
+zneni zakona
 {p.payload['zneni']}
 ---------------------------------
 """ for p in top_paragraphs])
 
-            st.write(f"Přeformulovaný dotaz: {rephrased_question}")
+        # Prepare the final response including the rephrased question and the answer
+        final_response = f"Přeformulovaný dotaz: {rephrased_question}\n\n"
 
-            # Answer the question using the found paragraphs
-            model = ChatOpenAI(model=model_choice, temperature=0.6)
-            prompt = ChatPromptTemplate.from_messages(
-                [
-                    (
-                        "system",
-                        """You are a highly qualified lawyer with many years of experience.
-                        Your task is to answer the following question, to answer which you will be given
-                        the context of the relevant sections to the question along with its number,
-                        its wording and the law it is from. For your answer, use exclusively the attached
-                        context. Always properly cite the law and the paragraph number that you used to 
-                        answer the question.
-                        
-                        You must always answer in Czech language only.""",
-                    ),
-                    ("human", f"QUESTION: {rephrased_question}\nCONTEXT: {context_str}"),
-                ]
-            )
-            runnable = prompt | model | StrOutputParser()
+        with st.chat_message("assistant"):
+            assistant_placeholder = st.empty()
+            assistant_placeholder.markdown("...")
 
-            # Stream the LLM response
-            response_placeholder = st.empty()
-            llm_response = ""
-            for chunk in runnable.stream({"question": rephrased_question, "context": context_str}, config=RunnableConfig()):
-                llm_response += chunk
-                response_placeholder.write(llm_response)  # Overwrite with new content
+        # Answer the question using the found paragraphs
+        model = ChatOpenAI(model=model_choice, temperature=0.6)
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    """You are a highly qualified lawyer with many years of experience.
+                    Your task is to answer the following question, to answer which you will be given
+                    the context of the relevant sections to the question along with its number,
+                    its wording and the law it is from. For your answer, use exclusively the attached
+                    context. Always properly cite the law and the paragraph number that you used to 
+                    answer the question. Make sure that the answer includes only the information that is
+                    relevant to the question.
+                    
+                    You must always answer in Czech language only.""",
+                ),
+                ("human", f"QUESTION: {rephrased_question}\nCONTEXT: {context_str}"),
+            ]
+        )
+        runnable = prompt | model | StrOutputParser()
 
-            # Stream the relevant paragraphs found by vector search
-            relevant_paragraphs = []
-            for p in top_paragraphs:
-                parts = p.payload['staleURL'].split("/")
-                numbering = "/".join(parts[-3:-1][::-1])
-                relevant_paragraphs.append(f"§ {p.payload['cislo']} zákona č. {numbering} Sb.")
-            st.write("NALEZENÉ RELEVANTNÍ PARAGRAFY:")
-            for p in relevant_paragraphs:
-                st.write(p+"\n")
+        # Stream the LLM response
+        llm_response = ""
+        for chunk in runnable.stream({"question": rephrased_question, "context": context_str}, config=RunnableConfig()):
+            llm_response += chunk
+            assistant_placeholder.markdown(f"{final_response}\n\n{llm_response}")
+
+        # Combine the final response and the LLM response
+        complete_response = f"{final_response}{llm_response}"
+        relevant_paragraphs_numbering = []
+        for p in top_paragraphs:
+            parts = p.payload['staleURL'].split("/")
+            numbering = "/".join(parts[-3:-1][::-1])
+            relevant_paragraphs_numbering.append(numbering)
+        # Append the final response and the relevant paragraphs to the chat history
+        relevant_paragraphs_str = "\n\n".join([f"§ {par.payload['cislo']} zákona č. {num} Sb." for (par, num) in zip(top_paragraphs, relevant_paragraphs_numbering)])
+        complete_response += f"\n\nNALEZENÉ RELEVANTNÍ PARAGRAFY:\n\n{relevant_paragraphs_str}"
+        st.session_state.messages.append({"role": "assistant", "content": complete_response})
+
+        # Update the chat history display
+        st.experimental_rerun()
 
 if __name__ == "__main__":
     asyncio.run(main())
