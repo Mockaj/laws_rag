@@ -177,7 +177,6 @@ zneni zakona
         for chunk in runnable.stream({"question": rephrased_question, "context": context_str}, config=RunnableConfig()):
             llm_response += chunk
             assistant_placeholder.markdown(f"{final_response}\n\n{llm_response}")
-
         # Combine the final response and the LLM response
         complete_response = f"{final_response}{llm_response}"
         relevant_paragraphs_numbering = []
